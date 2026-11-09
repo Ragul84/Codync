@@ -574,6 +574,23 @@ class HypurrStore(
     suspend fun setStandupReminder(enabled: Boolean, time: String, timeZone: String) =
         (client ?: throw HostException.unreachable()).setStandupReminder(enabled, time, timeZone).reminder
 
+    // Routines
+    suspend fun routines(botId: String) = cl().routines(botId)
+    suspend fun routineSchedule(
+        triggers: List<com.ragul84.hypurr.model.RoutineTrigger>? = null,
+        timeZone: String? = null,
+        draft: com.ragul84.hypurr.model.RoutineScheduleDraft? = null,
+    ) = cl().routineSchedule(triggers, timeZone, draft)
+    suspend fun saveRoutine(
+        botId: String, id: String?, name: String, instruction: String,
+        schedule: com.ragul84.hypurr.model.RoutineScheduleDraft, timeoutSeconds: String, enabled: Boolean? = null,
+    ) = cl().saveRoutine(botId, id, name, instruction, schedule, timeoutSeconds, enabled)
+    suspend fun setRoutineEnabled(botId: String, id: String, enabled: Boolean) = cl().setRoutineEnabled(botId, id, enabled)
+    suspend fun deleteRoutine(botId: String, id: String) = cl().deleteRoutine(botId, id)
+    suspend fun runRoutine(botId: String, id: String) = cl().runRoutine(botId, id)
+    suspend fun routineWebhook(botId: String, id: String, rotate: Boolean = false) = cl().routineWebhook(botId, id, rotate)
+
+
     // MARK: work tools and costs
 
     private val _integrations = MutableStateFlow<Integrations?>(null)

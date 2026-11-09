@@ -556,8 +556,76 @@ class HostClient(val transport: ChannelTransport) {
             put("timeZone", timeZone)
         })
 
+
+    // --- Routines (schedule / webhook automations on this bot) ---
+    suspend fun routines(botId: String): com.ragul84.hypurr.model.RoutineListing =
+        call("routines", buildJsonObject { put("botId", botId) })
+
+    suspend fun routineSchedule(
+        triggers: List<com.ragul84.hypurr.model.RoutineTrigger>? = null,
+        timeZone: String? = null,
+        draft: com.ragul84.hypurr.model.RoutineScheduleDraft? = null,
+    ): com.ragul84.hypurr.model.RoutineSchedulePreview =
+        call("routineSchedule", buildJsonObject {
+            triggers?.let {
+                put("triggers", com.ragul84.hypurr.model.HypurrJson.encodeToJsonElement(
+                    kotlinx.serialization.builtins.ListSerializer(com.ragul84.hypurr.model.RoutineTrigger.serializer()), it))
+            }
+            timeZone?.let { put("timeZone", it) }
+            draft?.let {
+                put("draft", com.ragul84.hypurr.model.HypurrJson.encodeToJsonElement(
+                    com.ragul84.hypurr.model.RoutineScheduleDraft.serializer(), it))
+            }
+        })
+
+    suspend fun saveRoutine(
+        botId: String,
+        id: String?,
+        name: String,
+        instruction: String,
+        schedule: com.ragul84.hypurr.model.RoutineScheduleDraft,
+        timeoutSeconds: String,
+        enabled: Boolean? = null,
+    ): com.ragul84.hypurr.model.Routine {
+        val reply: com.ragul84.hypurr.model.RoutineSaveReply = call("saveRoutine", buildJsonObject {
+            put("botId", botId)
+            id?.let { put("id", it) }
+            put("name", name)
+            put("instruction", instruction)
+            put("schedule", com.ragul84.hypurr.model.HypurrJson.encodeToJsonElement(
+                com.ragul84.hypurr.model.RoutineScheduleDraft.serializer(), schedule))
+            put("timeoutSeconds", timeoutSeconds)
+            enabled?.let { put("enabled", it) }
+        })
+        return reply.routine
+    }
+
+    suspend fun setRoutineEnabled(botId: String, id: String, enabled: Boolean) {
+        call<kotlinx.serialization.json.JsonObject>("setRoutineEnabled", buildJsonObject {
+            put("botId", botId); put("id", id); put("enabled", enabled)
+        })
+    }
+
+    suspend fun deleteRoutine(botId: String, id: String) {
+        call<kotlinx.serialization.json.JsonObject>("deleteRoutine", buildJsonObject {
+            put("botId", botId); put("id", id)
+        })
+    }
+
+    suspend fun runRoutine(botId: String, id: String) {
+        call<kotlinx.serialization.json.JsonObject>("runRoutine", buildJsonObject {
+            put("botId", botId); put("id", id)
+        }, timeoutMs = 10_000)
+    }
+
+    suspend fun routineWebhook(botId: String, id: String, rotate: Boolean = false): com.ragul84.hypurr.model.RoutineWebhook =
+        call("routineWebhook", buildJsonObject {
+            put("botId", botId); put("id", id); put("rotate", rotate)
+        })
+
     fun events(since: Long): Flow<HostEvent> = transport.events(since).mapNotNull(HostEvent::parse)
 }
+
 
 /** Opens channels to computers (§7.5) and pairs new ones from a QR (§4.1). */
 object HostConnector {

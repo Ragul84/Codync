@@ -162,6 +162,8 @@ fun ChatScreen(
     onReact: (Entry, String) -> Unit = { _, _ -> },
     /** Opens the bot's (or group's) settings; null hides it. */
     onEdit: (() -> Unit)? = null,
+    /** Opens a routine from a chat notice; null ignores taps. */
+    onOpenRoutine: ((String) -> Unit)? = null,
     initialActionsFor: String? = null,
     /** Opens the folder picker (a new task in another folder); null hides "Change". */
     onChangeFolder: (() -> Unit)? = null,
@@ -197,7 +199,8 @@ fun ChatScreen(
             items(chat, key = { it.data.clientNonce ?: it.id }) { entry ->
                 Box(Modifier.animateItem(fadeInSpec = Motion.effects(), placementSpec = Motion.offset)) {
                     Message(entry, bot, bots, task, you, media, inThread, onRespond, onUndo, onOpenLink, onOpenThread, onReact,
-                        live = bot.status == "working" && entry.kind == "agent" && entry.data.final != true && entry == chat.firstOrNull()) { actionsFor = it }
+                        live = bot.status == "working" && entry.kind == "agent" && entry.data.final != true && entry == chat.firstOrNull(),
+                        onOpenRoutine = onOpenRoutine, onActions = { actionsFor = it })
                 }
             }
             if (threadRoot != null) {
@@ -207,7 +210,8 @@ fun ChatScreen(
                         textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
                 }
                 item(key = "root") {
-                    Message(threadRoot, bot, bots, task, you, media, true, onRespond, onUndo, onOpenLink, onOpenThread, onReact) { actionsFor = it }
+                    Message(threadRoot, bot, bots, task, you, media, true, onRespond, onUndo, onOpenLink, onOpenThread, onReact,
+                        onOpenRoutine = onOpenRoutine, onActions = { actionsFor = it })
                 }
             } else if (chat.isEmpty()) item(key = "empty") { EmptyChat(bot, bots) }
         }
@@ -274,14 +278,15 @@ internal class AttachmentUi(
 @Composable
 private fun Message(entry: Entry, bot: Bot, bots: Map<String, Bot>, task: TaskInfo?, you: Actor?, media: AttachmentUi, inThread: Boolean,
                     onRespond: (Entry, String?) -> Unit, onUndo: (Entry) -> Unit, onOpenLink: (String) -> Unit,
-                    onOpenThread: (Entry) -> Unit, onReact: (Entry, String) -> Unit, live: Boolean = false, onActions: (Entry) -> Unit) {
+                    onOpenThread: (Entry) -> Unit, onReact: (Entry, String) -> Unit, live: Boolean = false,
+                    onOpenRoutine: ((String) -> Unit)? = null, onActions: (Entry) -> Unit) {
     val talk = entry.kind == "user" || entry.kind == "agent"
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (entry.kind == "user") Alignment.End else Alignment.Start) {
         when (entry.kind) {
             "user" -> UserBubble(entry, media) { onActions(entry) }
             "agent" -> AgentBubble(entry, if (bot.isGroup) entry.data.author?.let(bots::get) else null, live) { onActions(entry) }
             "permission" -> PermissionCard(entry, task, onRespond, onUndo, you?.isAdmin != false)
-            else -> entry.data.learning?.let { LearningCard(it, onOpenLink) } ?: Notice(entry)
+            else -> entry.data.learning?.let { LearningCard(it, onOpenLink) } ?: Notice(entry, onOpenRoutine)
         }
         if (talk) {
             val reactions = entry.data.reactions.orEmpty()
@@ -737,11 +742,14 @@ private fun LearningCard(l: Learning, onOpenLink: (String) -> Unit) {
 }
 
 @Composable
-private fun Notice(entry: Entry) {
+private fun Notice(entry: Entry, onOpenRoutine: ((String) -> Unit)? = null) {
     val c = Hypurr.colors
     val error = entry.data.style == "error"
+    val routineId = entry.data.routineId
+    val base = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 4.dp)
+    val mod = if (routineId != null && onOpenRoutine != null) base.pressable("Open routine") { onOpenRoutine(routineId) } else base
     Text(entry.data.text.orEmpty(), color = if (error) c.danger else c.tertiary, style = MaterialTheme.typography.bodySmall,
-        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 4.dp))
+        textAlign = TextAlign.Center, modifier = mod)
     if (error) com.ragul84.hypurr.ui.StartFreeAction(entry.data.text.orEmpty(), Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 4.dp))
 }
 
