@@ -976,6 +976,38 @@ async fn run(hub: &Arc<Hub>, caller: &Caller, actor: &crate::admin::Actor, metho
             let (cols, rows) = term_size(&b);
             json!({"term": hub.terms.start(str_arg(&b, "backend")?, step, b["method"].as_str(), cols, rows).await?})
         }
+        // Interactive project/task shell (scoped cwd). Not the agent install/login setup terminal.
+        "openShell" => {
+            let (cols, rows) = term_size(&b);
+            let requested = if let Some(task_id) = b["taskId"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                let tasks = hub.store.tasks_data(500)?;
+                let task = tasks
+                    .into_iter()
+                    .find(|t| t["id"].as_str() == Some(task_id))
+                    .ok_or_else(|| anyhow!("That task isn't on this computer."))?;
+                task["worktree"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| task["project"].as_str())
+                    .ok_or_else(|| anyhow!("That task has no folder to open."))?
+                    .to_owned()
+            } else if let Some(bot_id) = b["botId"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                let row = hub
+                    .store
+                    .bot(bot_id)?
+                    .filter(|r| !r.deleted && !r.config.is_group())
+                    .ok_or_else(|| anyhow!("That bot isn't on this computer."))?;
+                if row.config.cwd.is_empty() {
+                    bail!("That bot has no project folder yet.");
+                }
+                row.config.cwd
+            } else {
+                str_arg(&b, "cwd")?.to_owned()
+            };
+            let cwd = crate::agent::term::resolve_shell_cwd(&hub.store, std::path::Path::new(&requested))?;
+            let term = hub.terms.open_shell(&hub.store, &cwd.to_string_lossy(), cols, rows)?;
+            json!({"term": term, "cwd": cwd.display().to_string()})
+        }
         "agentModels" => {
             let backend = str_arg(&b, "backend")?;
             match crate::agent::auth::models(&hub.store, backend).await {

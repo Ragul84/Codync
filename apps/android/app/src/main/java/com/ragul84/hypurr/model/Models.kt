@@ -1165,3 +1165,9 @@ data class RestructureApplied(
 
 @Serializable
 data class MapReply(val map: PageMapData? = null, val plan: RestructurePlan? = null, val applied: RestructureApplied? = null)
+
+@Serializable
+data class OpenShellReply(val term: String = "", val cwd: String = "")
+
+@Serializable
+data class TermEventWire(val type: String = "", val data: String? = null, val code: Int? = null)

@@ -556,8 +556,45 @@ class HostClient(val transport: ChannelTransport) {
             put("timeZone", timeZone)
         })
 
+
+    // --- Project / task shell (not agent install/login setup) ---
+    suspend fun openShell(cwd: String? = null, botId: String? = null, taskId: String? = null, cols: Int = 80, rows: Int = 24):
+        com.ragul84.hypurr.model.OpenShellReply =
+        call("openShell", buildJsonObject {
+            cwd?.let { put("cwd", it) }
+            botId?.let { put("botId", it) }
+            taskId?.let { put("taskId", it) }
+            put("cols", cols)
+            put("rows", rows)
+        }, timeoutMs = 30_000)
+
+    suspend fun termInput(term: String, dataBase64: String) {
+        call<kotlinx.serialization.json.JsonObject>("termInput", buildJsonObject {
+            put("term", term); put("data", dataBase64)
+        })
+    }
+
+    suspend fun termResize(term: String, cols: Int, rows: Int) {
+        call<kotlinx.serialization.json.JsonObject>("termResize", buildJsonObject {
+            put("term", term); put("cols", cols); put("rows", rows)
+        })
+    }
+
+    suspend fun termClose(term: String) {
+        call<kotlinx.serialization.json.JsonObject>("termClose", buildJsonObject { put("term", term) })
+    }
+
+    fun termEvents(termId: String): Flow<com.ragul84.hypurr.model.TermEventWire> =
+        transport.termEvents(termId).mapNotNull { el ->
+            runCatching {
+                com.ragul84.hypurr.model.HypurrJson.decodeFromJsonElement(
+                    com.ragul84.hypurr.model.TermEventWire.serializer(), el)
+            }.getOrNull()
+        }
+
     fun events(since: Long): Flow<HostEvent> = transport.events(since).mapNotNull(HostEvent::parse)
 }
+
 
 /** Opens channels to computers (§7.5) and pairs new ones from a QR (§4.1). */
 object HostConnector {

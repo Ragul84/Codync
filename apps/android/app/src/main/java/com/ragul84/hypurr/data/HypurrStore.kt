@@ -542,6 +542,15 @@ class HypurrStore(
     suspend fun restructureDiscard(project: String) = cl().restructureDiscard(project)
     suspend fun restructurePublish(project: String) = cl().restructurePublish(project)
 
+
+    // Project / task shell
+    suspend fun openShell(cwd: String? = null, botId: String? = null, taskId: String? = null, cols: Int = 80, rows: Int = 24) =
+        cl().openShell(cwd, botId, taskId, cols, rows)
+    suspend fun termInput(term: String, dataBase64: String) = cl().termInput(term, dataBase64)
+    suspend fun termResize(term: String, cols: Int, rows: Int) = cl().termResize(term, cols, rows)
+    suspend fun termClose(term: String) = cl().termClose(term)
+    fun termEvents(termId: String) = cl().termEvents(termId)
+
     private fun cl() = client ?: throw HostException.unreachable()
     suspend fun ticketSetup(): TicketSetup = cl().ticketSetup()
     suspend fun ticketResolve(input: String, project: String?): TicketResolve = cl().ticketResolve(input, project)

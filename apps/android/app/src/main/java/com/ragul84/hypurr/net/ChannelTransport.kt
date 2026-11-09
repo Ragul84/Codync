@@ -608,6 +608,24 @@ class ChannelTransport(
         }
     }
 
+    /** A terminal's output stream (`sub: term`): scrollback, then live, ending after exit. */
+    fun termEvents(termId: String): Flow<JsonElement> = channelFlow {
+        awaitReady(10_000)
+        val id = nextId()
+        val inbox = Channel<JsonElement>(Channel.UNLIMITED)
+        streams[id] = inbox
+        try {
+            sendInner(buildJsonObject {
+                put("id", id)
+                put("sub", "term")
+                put("b", buildJsonObject { put("term", termId) })
+            })
+            for (ev in inbox) send(ev)
+        } finally {
+            if (streams.remove(id) != null) runCatching { sendInner(cancelMessage(id)) }
+        }
+    }
+
     /** The host's event stream (`sub: events`), from `since` on; ends when the channel drops. */
     fun events(since: Long, client: String = CLIENT): Flow<JsonElement> = channelFlow {
         awaitReady(10_000)
