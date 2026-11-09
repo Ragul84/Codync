@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Hypurr"
 include(":app")
+include(":terminal-emulator")
+include(":terminal-view")

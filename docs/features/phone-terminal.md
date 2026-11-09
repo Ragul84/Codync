@@ -28,9 +28,17 @@ accepts a caller-supplied command string — only keystrokes after the shell sta
 
 | Client | Coverage |
 |--------|----------|
-| **Android** | Bot settings → **Terminal**. Live scrollback (ANSI stripped for readability), line input, Esc/Tab/^C/^D/arrows, resize, reconnect, close on leave. |
+| **Android** | Bot settings → **Terminal**. Full VT100/xterm via vendored Termux `terminal-emulator` + `terminal-view` (Apache-2.0): 16/256/truecolor, cursor, alternate screen, wrap, scroll regions, touch selection/copy, paste, extra keys (Esc/Tab/Ctrl/Alt/arrows/PgUp/PgDn/Home/End), pinch or A± font size, IME + safe-area padding, Hypurr light/dark. Connection states, reconnect, close on leave. |
 | **iPhone / Mac (kit)** | `HostClient.openShell` API wired. Full VT UI for **setup** terminals already exists (`SetupTerminal` + SwiftTerm). Project-shell screen entry is not in this PR. |
 | **Linux** | VTE UI exists for **setup** terminals. Project-shell entry not in this PR. |
+
+## Third-party (Android VT)
+
+Vendored under `apps/android/terminal-emulator` and `apps/android/terminal-view`
+from [termux/termux-app](https://github.com/termux/termux-app) tag `v0.118.0`
+(originally jackpal Android Terminal Emulator). Apache-2.0 only — **not** Termux
+app GPLv3 code. Local JNI PTY removed; bytes bridge to the host `openShell` PTY.
+See `NOTICE` and each module's `LICENSE` / `README.md`.
 
 ## API
 
@@ -44,11 +52,14 @@ accepts a caller-supplied command string — only keystrokes after the shell sta
 
 ## Tests
 
-- Host: `shell_cwd_must_be_under_a_known_project`, `open_shell_runs_interactive_pwd` (temp dir + `pwd; exit` only)
-- Android: `TerminalScreenTest` (ANSI strip / base64), `TerminalScreenshotTest` (connecting / live / ended)
+- Host: `shell_cwd_must_be_under_a_known_project`, `open_shell_runs_interactive_pwd`, `open_shell_benign_commands_in_temp_dir` (temp dir only; `pwd` / `echo` / `ls` / `exit`)
+- Android unit: `TerminalScreenTest` (VT colors/alt/cursor/wrap fixtures + base64)
+- Android screenshots (Roborazzi / **emulator**, not a real phone): connecting, TUI colors, alt screen, ended, small phone, keyboard-open — light/dark
+- Vendored Termux emulator tests under `:terminal-emulator:testDebugUnitTest`
 
 ## Limitations
 
-- Android shows stripped scrollback, not a full VT (colors / cursor addressing / full-screen TUIs are degraded). iPhone/Mac setup terminals use SwiftTerm for full VT; project shell UI there is still pending.
-- Not phone-verified on a real device in this PR (emulator / Roborazzi + host unit tests only).
+- iPhone/Mac/Linux project-shell UI still pending (setup terminals already have full VT).
+- Not phone-verified on a **real device** in this PR (Android emulator / Roborazzi + host unit tests only). Label: **emulator**.
 - No automatic sample commands are run from the UI.
+- Mouse reporting / some rare DEC modes follow Termux coverage; no local on-device shell.

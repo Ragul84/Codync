@@ -1,5 +1,7 @@
 package com.ragul84.hypurr
 
+import androidx.compose.foundation.isSystemInDarkTheme
+
 import android.Manifest
 import android.content.ClipboardManager
 import android.content.Intent
@@ -31,6 +33,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.result.PickVisualMediaRequest
 import com.ragul84.hypurr.data.HypurrStore
+import com.ragul84.hypurr.data.ThemeMode
 import com.ragul84.hypurr.data.PickedFile
 import com.ragul84.hypurr.model.Attachment
 import com.ragul84.hypurr.model.ScreenState
@@ -42,8 +45,8 @@ import com.ragul84.hypurr.ui.screens.BotEditorScreen
 import com.ragul84.hypurr.ui.screens.TerminalPhase
 import com.ragul84.hypurr.ui.screens.TerminalScreen
 import com.ragul84.hypurr.ui.screens.TerminalUiState
+import com.ragul84.hypurr.ui.screens.TerminalBridge
 import com.ragul84.hypurr.ui.screens.bytesToBase64
-import com.ragul84.hypurr.ui.screens.stripAnsi
 import android.util.Base64
 import com.ragul84.hypurr.ui.screens.BotEditorState
 import com.ragul84.hypurr.ui.screens.ComposerFiles
@@ -1624,11 +1627,11 @@ class MainActivity : ComponentActivity() {
         var closed by remember(botId) { mutableStateOf(false) }
         var cols by remember { mutableStateOf(80) }
         var rows by remember { mutableStateOf(24) }
-
-        fun appendOutput(chunk: String) {
-            val plain = stripAnsi(chunk)
-            if (plain.isEmpty()) return
-            state = state.copy(output = (state.output + plain).takeLast(200_000))
+        val themeMode by store.themeMode.collectAsState()
+        val dark = when (themeMode) {
+            ThemeMode.Dark -> true
+            ThemeMode.Light -> false
+            else -> isSystemInDarkTheme()
         }
 
         fun sendBytes(bytes: ByteArray) {
@@ -1638,6 +1641,12 @@ class MainActivity : ComponentActivity() {
                 runCatching { store.termInput(id, bytesToBase64(bytes)) }
                     .onFailure { state = state.copy(error = it.message ?: "Couldn't send.") }
             }
+        }
+
+        val writeRef = remember(botId) { arrayOf<(ByteArray) -> Unit>({ }) }
+        writeRef[0] = { sendBytes(it) }
+        val liveBridge = remember(botId) {
+            TerminalBridge(onWriteToHost = { writeRef[0](it) })
         }
 
         LaunchedEffect(botId) {
@@ -1660,10 +1669,12 @@ class MainActivity : ComponentActivity() {
                             "output" -> {
                                 val data = ev.data ?: return@collect
                                 val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return@collect
-                                appendOutput(bytes.toString(Charsets.UTF_8))
+                                liveBridge.append(bytes)
                             }
                             "exit" -> {
-                                state = state.copy(phase = TerminalPhase.Ended, exitCode = ev.code)
+                                val code = ev.code ?: 0
+                                liveBridge.notifyExit(code)
+                                state = state.copy(phase = TerminalPhase.Ended, exitCode = code)
                             }
                         }
                     }
@@ -1694,14 +1705,9 @@ class MainActivity : ComponentActivity() {
         TerminalScreen(
             state = state,
             offline = offline,
+            bridge = liveBridge,
+            darkTerminal = dark,
             onBack = onBack,
-            onDraft = { state = state.copy(draft = it) },
-            onSubmitLine = {
-                val line = state.draft
-                state = state.copy(draft = "")
-                sendBytes((line + "\n").toByteArray(Charsets.UTF_8))
-            },
-            onControl = { sendBytes(it) },
             onResize = { c, r ->
                 cols = c; rows = r
                 val id = termId ?: return@TerminalScreen
@@ -1711,10 +1717,12 @@ class MainActivity : ComponentActivity() {
                 closed = true
                 val id = termId ?: return@TerminalScreen
                 termId = null
+                liveBridge.detach()
                 scope.launch { runCatching { store.termClose(id) } }
             },
         )
     }
+
 
     companion object {
         const val EXTRA_BOT = "botId"

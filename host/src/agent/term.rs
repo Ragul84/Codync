@@ -663,4 +663,44 @@ mod tests {
         assert!(text.contains("Hypurr shell"), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_shell_benign_commands_in_temp_dir() {
+        let dir = std::env::temp_dir().join(format!("hypurr-shell-benign-{}", uuid::Uuid::new_v4()));
+        let project = dir.join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("hello.txt"), b"hi").unwrap();
+        let store = crate::store::Store::open(&dir.join("db.sqlite")).unwrap();
+        crate::tasks::save_project(&store, &serde_json::json!({"path": project.to_string_lossy(), "name": "proj"}))
+            .unwrap();
+        let terms = Arc::new(Terms::default());
+        let id = terms.open_shell(&store, &project.to_string_lossy(), 80, 24).unwrap();
+        let term = terms.get(&id).unwrap();
+        let (_, mut rx) = term.attach();
+        // Isolated temp dir only. Benign builtins — no network, no secrets, no user paths.
+        terms
+            .write(&id, &B64.encode("pwd; echo hypurr-ok; ls; exit\n"))
+            .unwrap();
+        let code = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let v = rx.recv().await.unwrap();
+                if v["type"] == "exit" {
+                    return v["code"].as_i64().unwrap();
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(code, 0);
+        let (head, _) = term.attach();
+        let text: String = head
+            .iter()
+            .filter_map(|v| v["data"].as_str())
+            .map(|d| String::from_utf8_lossy(&B64.decode(d).unwrap()).into_owned())
+            .collect();
+        assert!(text.contains("hypurr-ok"), "{text}");
+        assert!(text.contains("hello.txt"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
