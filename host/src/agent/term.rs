@@ -679,9 +679,7 @@ mod tests {
         let term = terms.get(&id).unwrap();
         let (_, mut rx) = term.attach();
         // Isolated temp dir only. Benign builtins — no network, no secrets, no user paths.
-        terms
-            .write(&id, &B64.encode("pwd; echo hypurr-ok; ls; exit\n"))
-            .unwrap();
+        terms.write(&id, &B64.encode("pwd; echo hypurr-ok; ls; exit\n")).unwrap();
         let code = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let v = rx.recv().await.unwrap();
