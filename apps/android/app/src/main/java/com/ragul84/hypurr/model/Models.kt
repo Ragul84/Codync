@@ -104,6 +104,8 @@ data class EntryData(
     val needsAdmin: Boolean? = null,
     /** A main-chat message with replies in its thread (host-maintained summary). */
     val thread: ThreadSummary? = null,
+    /** notice: opens this routine in the Routines screen. */
+    val routineId: String? = null,
 )
 
 /** `authors`: bot ids and `"user"`, first reply first; `unread`: replies newer than the thread was last read. */
@@ -1165,3 +1167,88 @@ data class RestructureApplied(
 
 @Serializable
 data class MapReply(val map: PageMapData? = null, val plan: RestructurePlan? = null, val applied: RestructureApplied? = null)
+
+/** A saved schedule or webhook that runs this bot (host `routines`). */
+@Serializable
+data class Routine(
+    val id: String = "",
+    val botId: String = "",
+    val name: String = "",
+    val instruction: String = "",
+    val triggers: List<RoutineTrigger> = emptyList(),
+    val enabled: Boolean = true,
+    val createdAt: Long = 0,
+    val updatedAt: Long = 0,
+    val triggerDescriptions: List<String> = emptyList(),
+    val nextRunAt: Long? = null,
+    val timeoutSeconds: Int? = null,
+    val lastError: String? = null,
+)
+
+@Serializable
+data class RoutineTrigger(
+    val type: String = "",
+    val seconds: Long? = null,
+    val at: Long? = null,
+    val expression: String? = null,
+    val timeZone: String? = null,
+    val source: String? = null,
+    val event: String? = null,
+    val filters: Map<String, String>? = null,
+)
+
+@Serializable
+data class RoutineRun(
+    val id: String = "",
+    val routineId: String = "",
+    val botId: String = "",
+    val status: String = "",
+    val createdAt: Long = 0,
+    val finishedAt: Long? = null,
+    val detail: String? = null,
+    val rootId: String? = null,
+) {
+    val isActive: Boolean get() = status in setOf("pending", "starting", "running", "recovering")
+}
+
+@Serializable
+data class RoutineListing(val routines: List<Routine> = emptyList(), val runs: List<RoutineRun> = emptyList())
+
+/** Form values only. The host hydrates, validates and describes schedules. */
+@Serializable
+data class RoutineScheduleDraft(
+    val kind: String = "cron",
+    val amount: String = "1",
+    val unit: Long = 3600,
+    val calendarStyle: String = "custom",
+    val weekday: Int = 1,
+    val selectedDays: List<Int> = emptyList(),
+    val monthDay: Int = 1,
+    val minuteStep: Int = 15,
+    val hour: Int = 9,
+    val minute: Int = 0,
+    val at: Long = 0,
+    val expression: String = "",
+    val zone: String = "",
+    val original: List<RoutineTrigger> = emptyList(),
+)
+
+@Serializable
+data class RoutineSchedulePreview(
+    val draft: RoutineScheduleDraft = RoutineScheduleDraft(),
+    val triggers: List<RoutineTrigger> = emptyList(),
+    val summary: String = "",
+    val nextRunAt: Long? = null,
+    val warning: String? = null,
+)
+
+@Serializable
+data class RoutineWebhook(
+    val url: String? = null,
+    val localUrl: String = "",
+    val key: String = "",
+    val connected: Boolean = false,
+)
+
+@Serializable
+data class RoutineSaveReply(val routine: Routine = Routine())

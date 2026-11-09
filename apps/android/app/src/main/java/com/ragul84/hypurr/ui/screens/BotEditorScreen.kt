@@ -138,6 +138,8 @@ fun BotEditorScreen(
     onBack: () -> Unit,
     /** Lists a folder on the computer (null = home). */
     onBrowse: (String?) -> Unit,
+    /** Opens schedules and webhooks for this bot; null hides the row. */
+    onRoutines: (() -> Unit)? = null,
 ) {
     val c = Hypurr.colors
     val title = when {
@@ -269,6 +271,10 @@ fun BotEditorScreen(
             }
             if (!state.isNew) {
                 Section("More") {
+                    if (!state.group && onRoutines != null) {
+                        SoftButton("Routines", Modifier.fillMaxWidth(), icon = signalIcon(SignalIcons.Clock)) { onRoutines() }
+                        Text("Run this bot on a schedule or when a webhook fires.", color = c.tertiary, style = MaterialTheme.typography.bodySmall)
+                    }
                     ToggleRow("Pin to the top", "Keeps it first in the list", state.pinned, true) { onChange(state.copy(pinned = it)) }
                     AnimatedVisibility(!state.confirmDelete) {
                         SoftButton(if (state.group) "Delete group" else "Delete bot", Modifier.fillMaxWidth(), icon = signalIcon(SignalIcons.Close), tint = c.needsText) {

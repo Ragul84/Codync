@@ -39,6 +39,14 @@ import com.ragul84.hypurr.screen.ScreenPhase
 import com.ragul84.hypurr.screen.ScreenSession
 import com.ragul84.hypurr.ui.screens.AttachKind
 import com.ragul84.hypurr.ui.screens.BotEditorScreen
+import com.ragul84.hypurr.ui.screens.RoutineEditorScreen
+import com.ragul84.hypurr.ui.screens.RoutinesScreen
+import com.ragul84.hypurr.model.Bot
+import com.ragul84.hypurr.model.Routine
+import com.ragul84.hypurr.model.RoutineRun
+import com.ragul84.hypurr.model.RoutineScheduleDraft
+import com.ragul84.hypurr.model.RoutineSchedulePreview
+import com.ragul84.hypurr.model.RoutineWebhook
 import com.ragul84.hypurr.ui.screens.BotEditorState
 import com.ragul84.hypurr.ui.screens.ComposerFiles
 import com.ragul84.hypurr.ui.screens.ScreenScreen
@@ -324,6 +332,8 @@ class MainActivity : ComponentActivity() {
         var screen by rememberSaveable { mutableStateOf("list") }
         // The new-task draft survives a trip to the folder picker.
         var taskDraft by remember { mutableStateOf<NewTaskUiState?>(null) }
+        // Prefills the chat composer when "Ask in chat" is used from Routines.
+        var routineComposerDraft by remember { mutableStateOf<String?>(null) }
         var guide by remember { mutableStateOf(com.ragul84.hypurr.ui.screens.GuideUiState()) }
         // Learning mode per task: cards, quiz, and tasks where the panel was hidden.
         var learnCards by remember { mutableStateOf(mapOf<String, List<com.ragul84.hypurr.model.LearnCard>>()) }
@@ -376,6 +386,13 @@ class MainActivity : ComponentActivity() {
                         return@AnimatedContent
                     }
                     var draft by rememberSaveable(target) { mutableStateOf("") }
+                    LaunchedEffect(target, routineComposerDraft) {
+                        val seed = routineComposerDraft
+                        if (seed != null && target.startsWith("chat:")) {
+                            draft = seed
+                            routineComposerDraft = null
+                        }
+                    }
                     var files by remember(target) { mutableStateOf(listOf<PickedFile>()) }
                     val integrations by store.integrations.collectAsState()
                     val threads by store.threads.collectAsState()
@@ -449,6 +466,7 @@ class MainActivity : ComponentActivity() {
                         onOpenThread = { e -> screen = "thread:$id:${e.id}" },
                         onReact = { e, emoji -> scope.launch { runCatching { store.react(e.id, emoji) } } },
                         onEdit = if (you?.canAct != false) ({ screen = "edit:$id" }) else null,
+                        onOpenRoutine = if (you?.canAct != false && !bot.isGroup) ({ rid -> screen = "routine:$id:$rid" }) else null,
                         onChangeFolder = if (you?.canAct != false && !bot.isGroup) ({ screen = "folderpick:chat:$id" }) else null,
                         learn = learnTask?.let { t ->
                             {
@@ -564,8 +582,83 @@ class MainActivity : ComponentActivity() {
                                     .onFailure { form = form.copy(error = it.message ?: "Couldn't list folders.") }
                             }
                         },
+                        onRoutines = editing?.takeIf { !it.isGroup }?.let { bot ->
+                            { screen = "routines:${bot.id}" }
+                        },
                     )
                 }
+
+                target.startsWith("routines:") -> {
+                    val botId = target.removePrefix("routines:")
+                    val bot = bots[botId]
+                    if (bot == null || bot.isGroup) {
+                        LaunchedEffect(botId) { screen = "list" }
+                    } else {
+                        var routines by remember(botId) { mutableStateOf(emptyList<Routine>()) }
+                        var runs by remember(botId) { mutableStateOf(emptyList<RoutineRun>()) }
+                        var loaded by remember(botId) { mutableStateOf(false) }
+                        var busy by remember(botId) { mutableStateOf(false) }
+                        var error by remember(botId) { mutableStateOf<String?>(null) }
+                        val offline = linkState !is LinkState.Ready
+                        fun refresh() {
+                            scope.launch {
+                                runCatching { store.routines(botId) }
+                                    .onSuccess { routines = it.routines; runs = it.runs; loaded = true; error = null }
+                                    .onFailure { if (!loaded) error = it.message ?: "Couldn't load routines." }
+                            }
+                        }
+                        RoutinesScreen(
+                            botName = bot.name,
+                            routines = routines,
+                            runs = runs,
+                            loaded = loaded,
+                            busy = busy,
+                            offline = offline,
+                            error = error,
+                            onBack = { screen = parentOf(target) },
+                            onRefresh = { refresh() },
+                            onOpen = { r -> screen = if (r == null) "routine:$botId" else "routine:$botId:${r.id}" },
+                            onToggle = { r, on ->
+                                busy = true
+                                scope.launch {
+                                    runCatching { store.setRoutineEnabled(botId, r.id, on) }
+                                        .onSuccess { error = null; refresh() }
+                                        .onFailure { error = it.message ?: "Couldn't update the routine." }
+                                    busy = false
+                                }
+                            },
+                            onAskInChat = {
+                                routineComposerDraft = "I want a routine that "
+                                screen = "chat:$botId"
+                            },
+                        )
+                    }
+                }
+                target.startsWith("routine:") -> {
+                    val parts = target.split(':')
+                    val botId = parts.getOrNull(1).orEmpty()
+                    val routineId = parts.getOrNull(2)
+                    val bot = bots[botId]
+                    if (bot == null || bot.isGroup) {
+                        LaunchedEffect(botId) { screen = "list" }
+                    } else {
+                        RoutineEditorRoute(
+                            store = store,
+                            bot = bot,
+                            routineId = routineId,
+                            offline = linkState !is LinkState.Ready,
+                            onBack = { screen = parentOf(target) },
+                            onSaved = { saved ->
+                                screen = if (saved != null && saved.triggers.any { it.type == "webhook" } && routineId == null)
+                                    "routine:$botId:${saved.id}"
+                                else
+                                    "routines:$botId"
+                            },
+                            onCopy = { label, text -> copyText(label, text) },
+                        )
+                    }
+                }
+
                 target == "screen" -> ScreenRoute(store, current.name) { screen = "list" }
                 target == "qa" -> QaRoute(store, projectFolder, qaDraft, { qaDraft = it }) { screen = it }
                 target == "trace" -> TraceMapRoute(store, projectFolder, traceDraft, { traceDraft = it }) { screen = it }
@@ -1140,6 +1233,11 @@ class MainActivity : ComponentActivity() {
     private fun parentOf(screen: String): String = when {
         screen.startsWith("thread:") -> "chat:" + screen.split(':')[1]
         screen.startsWith("edit:") -> "chat:" + screen.removePrefix("edit:")
+        screen.startsWith("routine:") -> {
+            val parts = screen.split(':')
+            if (parts.size >= 3) "routines:${parts[1]}" else "chat:${parts.getOrNull(1) ?: ""}"
+        }
+        screen.startsWith("routines:") -> "chat:" + screen.removePrefix("routines:")
         screen == "team" || screen == "profile" -> "settings"
         screen == "folderpick:settings" -> "settings"
         screen == "folderpick:newtask" -> "newtask"
@@ -1580,6 +1678,151 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+
+    /** Create or edit one routine for [bot]; [routineId] null means new. */
+    @Composable
+    private fun RoutineEditorRoute(
+        store: HypurrStore,
+        bot: Bot,
+        routineId: String?,
+        offline: Boolean,
+        onBack: () -> Unit,
+        onSaved: (Routine?) -> Unit,
+        onCopy: (String, String) -> Unit,
+    ) {
+        val scope = rememberCoroutineScope()
+        var existing by remember(routineId) { mutableStateOf<Routine?>(null) }
+        var name by remember(routineId) { mutableStateOf("") }
+        var instruction by remember(routineId) { mutableStateOf("") }
+        var timeout by remember(routineId) { mutableStateOf("3600") }
+        var schedule by remember(routineId) { mutableStateOf(RoutineScheduleDraft(zone = java.util.TimeZone.getDefault().id)) }
+        var preview by remember(routineId) { mutableStateOf<RoutineSchedulePreview?>(null) }
+        var previewError by remember(routineId) { mutableStateOf<String?>(null) }
+        var loaded by remember(routineId) { mutableStateOf(false) }
+        var busy by remember { mutableStateOf(false) }
+        var error by remember { mutableStateOf<String?>(null) }
+        var confirmDelete by remember { mutableStateOf(false) }
+        var webhook by remember(routineId) { mutableStateOf<RoutineWebhook?>(null) }
+        var webhookBusy by remember { mutableStateOf(false) }
+        var webhookError by remember { mutableStateOf<String?>(null) }
+        var keyRevealed by remember { mutableStateOf(false) }
+
+        LaunchedEffect(bot.id, routineId) {
+            loaded = false
+            preview = null
+            previewError = null
+            var current: Routine? = null
+            if (routineId != null) {
+                runCatching { store.routines(bot.id) }.onSuccess { listing ->
+                    current = listing.routines.firstOrNull { it.id == routineId }
+                    existing = current
+                    current?.let { r ->
+                        name = r.name
+                        instruction = r.instruction
+                        timeout = (r.timeoutSeconds ?: 3600).toString()
+                    }
+                }.onFailure { error = it.message ?: "Couldn't load the routine." }
+            }
+            runCatching {
+                store.routineSchedule(
+                    triggers = current?.triggers ?: emptyList(),
+                    timeZone = java.util.TimeZone.getDefault().id,
+                )
+            }.onSuccess {
+                var next = it.draft.copy(calendarStyle = "custom")
+                if (next.kind !in listOf("cron", "webhook") && current != null) {
+                    next = next.copy(kind = "keep")
+                }
+                schedule = next
+                preview = it.copy(draft = next)
+                loaded = true
+            }.onFailure {
+                previewError = it.message ?: "Couldn't load the schedule."
+                loaded = true
+            }
+        }
+
+        LaunchedEffect(schedule, loaded) {
+            if (!loaded) return@LaunchedEffect
+            kotlinx.coroutines.delay(300)
+            runCatching { store.routineSchedule(draft = schedule) }
+                .onSuccess { preview = it; previewError = null }
+                .onFailure { previewError = it.message ?: "That schedule isn't valid."; preview = null }
+        }
+
+        RoutineEditorScreen(
+            botName = bot.name,
+            routine = existing,
+            schedule = schedule,
+            preview = preview,
+            previewError = previewError,
+            loaded = loaded,
+            name = name,
+            instruction = instruction,
+            timeout = timeout,
+            busy = busy,
+            offline = offline,
+            error = error,
+            confirmDelete = confirmDelete,
+            webhook = webhook,
+            webhookBusy = webhookBusy,
+            webhookError = webhookError,
+            keyRevealed = keyRevealed,
+            onName = { name = it },
+            onInstruction = { instruction = it },
+            onTimeout = { timeout = it },
+            onSchedule = { schedule = it },
+            onBack = onBack,
+            onSave = {
+                busy = true
+                error = null
+                scope.launch {
+                    runCatching {
+                        store.saveRoutine(bot.id, existing?.id, name.trim(), instruction.trim(), schedule, timeout.trim())
+                    }.onSuccess { saved ->
+                        existing = saved
+                        onSaved(saved)
+                    }.onFailure { error = it.message ?: "Couldn't save the routine." }
+                    busy = false
+                }
+            },
+            onDelete = {
+                val id = existing?.id ?: return@RoutineEditorScreen
+                busy = true
+                scope.launch {
+                    runCatching { store.deleteRoutine(bot.id, id) }
+                        .onSuccess { onSaved(null) }
+                        .onFailure { error = it.message ?: "Couldn't delete the routine."; confirmDelete = false }
+                    busy = false
+                }
+            },
+            onConfirmDelete = { confirmDelete = it },
+            onRunNow = {
+                val id = existing?.id ?: return@RoutineEditorScreen
+                busy = true
+                scope.launch {
+                    runCatching { store.runRoutine(bot.id, id) }
+                        .onSuccess { error = null; onBack() }
+                        .onFailure { error = it.message ?: "Couldn't start the routine." }
+                    busy = false
+                }
+            },
+            onLoadWebhook = { rotate ->
+                val id = existing?.id ?: return@RoutineEditorScreen
+                webhookBusy = true
+                webhookError = null
+                scope.launch {
+                    runCatching { store.routineWebhook(bot.id, id, rotate) }
+                        .onSuccess { webhook = it; if (rotate) keyRevealed = true }
+                        .onFailure { webhookError = it.message ?: "Couldn't load the webhook." }
+                    webhookBusy = false
+                }
+            },
+            onRevealKey = { keyRevealed = it },
+            onCopy = onCopy,
+        )
     }
 
     companion object {
