@@ -1,5 +1,7 @@
 package com.ragul84.hypurr
 
+import androidx.compose.foundation.isSystemInDarkTheme
+
 import android.Manifest
 import android.content.ClipboardManager
 import android.content.Intent
@@ -31,6 +33,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.result.PickVisualMediaRequest
 import com.ragul84.hypurr.data.HypurrStore
+import com.ragul84.hypurr.data.ThemeMode
 import com.ragul84.hypurr.data.PickedFile
 import com.ragul84.hypurr.model.Attachment
 import com.ragul84.hypurr.model.ScreenState
@@ -39,6 +42,12 @@ import com.ragul84.hypurr.screen.ScreenPhase
 import com.ragul84.hypurr.screen.ScreenSession
 import com.ragul84.hypurr.ui.screens.AttachKind
 import com.ragul84.hypurr.ui.screens.BotEditorScreen
+import com.ragul84.hypurr.ui.screens.TerminalPhase
+import com.ragul84.hypurr.ui.screens.TerminalScreen
+import com.ragul84.hypurr.ui.screens.TerminalUiState
+import com.ragul84.hypurr.ui.screens.TerminalBridge
+import com.ragul84.hypurr.ui.screens.bytesToBase64
+import android.util.Base64
 import com.ragul84.hypurr.ui.screens.BotEditorState
 import com.ragul84.hypurr.ui.screens.ComposerFiles
 import com.ragul84.hypurr.ui.screens.ScreenScreen
@@ -564,8 +573,28 @@ class MainActivity : ComponentActivity() {
                                     .onFailure { form = form.copy(error = it.message ?: "Couldn't list folders.") }
                             }
                         },
+                        onTerminal = editing?.takeIf { !it.isGroup && it.cwd.isNotBlank() }?.let { bot ->
+                            { screen = "terminal:${bot.id}" }
+                        },
                     )
                 }
+
+                target.startsWith("terminal:") -> {
+                    val botId = target.removePrefix("terminal:")
+                    val bot = bots[botId]
+                    if (bot == null || bot.isGroup) {
+                        LaunchedEffect(botId) { screen = "list" }
+                    } else {
+                        TerminalRoute(
+                            store = store,
+                            title = bot.name,
+                            botId = bot.id,
+                            offline = linkState !is LinkState.Ready,
+                            onBack = { screen = parentOf(target) },
+                        )
+                    }
+                }
+
                 target == "screen" -> ScreenRoute(store, current.name) { screen = "list" }
                 target == "qa" -> QaRoute(store, projectFolder, qaDraft, { qaDraft = it }) { screen = it }
                 target == "trace" -> TraceMapRoute(store, projectFolder, traceDraft, { traceDraft = it }) { screen = it }
@@ -1140,6 +1169,7 @@ class MainActivity : ComponentActivity() {
     private fun parentOf(screen: String): String = when {
         screen.startsWith("thread:") -> "chat:" + screen.split(':')[1]
         screen.startsWith("edit:") -> "chat:" + screen.removePrefix("edit:")
+        screen.startsWith("terminal:") -> "edit:" + screen.removePrefix("terminal:")
         screen == "team" || screen == "profile" -> "settings"
         screen == "folderpick:settings" -> "settings"
         screen == "folderpick:newtask" -> "newtask"
@@ -1581,6 +1611,118 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+
+    @Composable
+    private fun TerminalRoute(
+        store: HypurrStore,
+        title: String,
+        botId: String,
+        offline: Boolean,
+        onBack: () -> Unit,
+    ) {
+        val scope = rememberCoroutineScope()
+        var state by remember(botId) { mutableStateOf(TerminalUiState(title = title, phase = TerminalPhase.Connecting)) }
+        var termId by remember(botId) { mutableStateOf<String?>(null) }
+        var closed by remember(botId) { mutableStateOf(false) }
+        var cols by remember { mutableStateOf(80) }
+        var rows by remember { mutableStateOf(24) }
+        val themeMode by store.themeMode.collectAsState()
+        val dark = when (themeMode) {
+            ThemeMode.Dark -> true
+            ThemeMode.Light -> false
+            else -> isSystemInDarkTheme()
+        }
+
+        fun sendBytes(bytes: ByteArray) {
+            val id = termId ?: return
+            if (state.phase != TerminalPhase.Live && state.phase != TerminalPhase.Reconnecting) return
+            scope.launch {
+                runCatching { store.termInput(id, bytesToBase64(bytes)) }
+                    .onFailure { state = state.copy(error = it.message ?: "Couldn't send.") }
+            }
+        }
+
+        val writeRef = remember(botId) { arrayOf<(ByteArray) -> Unit>({ }) }
+        writeRef[0] = { sendBytes(it) }
+        val liveBridge = remember(botId) {
+            TerminalBridge(onWriteToHost = { writeRef[0](it) })
+        }
+
+        LaunchedEffect(botId) {
+            closed = false
+            state = TerminalUiState(title = title, phase = TerminalPhase.Connecting)
+            val opened = runCatching { store.openShell(botId = botId, cols = cols, rows = rows) }
+            opened.onFailure {
+                state = state.copy(phase = TerminalPhase.Failed, error = it.message ?: "Couldn't open the shell.")
+                return@LaunchedEffect
+            }
+            val reply = opened.getOrThrow()
+            termId = reply.term
+            state = state.copy(cwd = reply.cwd, phase = TerminalPhase.Live, error = null)
+            var attempt = 0
+            while (!closed && state.phase != TerminalPhase.Ended && state.phase != TerminalPhase.Failed) {
+                try {
+                    store.termEvents(reply.term).collect { ev ->
+                        attempt = 0
+                        when (ev.type) {
+                            "output" -> {
+                                val data = ev.data ?: return@collect
+                                val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: return@collect
+                                liveBridge.append(bytes)
+                            }
+                            "exit" -> {
+                                val code = ev.code ?: 0
+                                liveBridge.notifyExit(code)
+                                state = state.copy(phase = TerminalPhase.Ended, exitCode = code)
+                            }
+                        }
+                    }
+                    if (state.phase == TerminalPhase.Live) {
+                        attempt++
+                        if (attempt > 5) {
+                            state = state.copy(phase = TerminalPhase.Failed, error = "Lost the terminal connection.")
+                            break
+                        }
+                        state = state.copy(phase = TerminalPhase.Reconnecting)
+                        kotlinx.coroutines.delay(1_000)
+                        if (!closed) state = state.copy(phase = TerminalPhase.Live)
+                    } else break
+                } catch (e: Exception) {
+                    if (closed) break
+                    attempt++
+                    if (attempt > 5) {
+                        state = state.copy(phase = TerminalPhase.Failed, error = e.message ?: "Lost the terminal connection.")
+                        break
+                    }
+                    state = state.copy(phase = TerminalPhase.Reconnecting, error = null)
+                    kotlinx.coroutines.delay(1_000)
+                    if (!closed) state = state.copy(phase = TerminalPhase.Live)
+                }
+            }
+        }
+
+        TerminalScreen(
+            state = state,
+            offline = offline,
+            bridge = liveBridge,
+            darkTerminal = dark,
+            onBack = onBack,
+            onResize = { c, r ->
+                cols = c; rows = r
+                val id = termId ?: return@TerminalScreen
+                scope.launch { runCatching { store.termResize(id, c, r) } }
+            },
+            onDisconnect = {
+                closed = true
+                val id = termId ?: return@TerminalScreen
+                termId = null
+                liveBridge.detach()
+                scope.launch { runCatching { store.termClose(id) } }
+            },
+        )
+    }
+
 
     companion object {
         const val EXTRA_BOT = "botId"

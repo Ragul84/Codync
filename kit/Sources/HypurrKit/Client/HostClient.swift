@@ -371,6 +371,17 @@ public extension HostClient {
     func termClose(_ term: String) async throws {
         let _: Empty = try await call("termClose", ["term": term])
     }
+
+    /// Interactive shell in a scoped project/task folder (not agent install/login).
+    public func openShell(cwd: String? = nil, botId: String? = nil, taskId: String? = nil, cols: Int = 80, rows: Int = 24) async throws -> OpenShellReply {
+        struct Body: Encodable { var cwd: String?; var botId: String?; var taskId: String?; var cols: Int; var rows: Int }
+        return try await call("openShell", Body(cwd: cwd, botId: botId, taskId: taskId, cols: cols, rows: rows), timeout: 30)
+    }
+}
+
+public struct OpenShellReply: Codable, Sendable {
+    public var term: String
+    public var cwd: String
 }
 
 public struct ScreenAnswer: Codable, Sendable {

@@ -138,6 +138,8 @@ fun BotEditorScreen(
     onBack: () -> Unit,
     /** Lists a folder on the computer (null = home). */
     onBrowse: (String?) -> Unit,
+    /** Opens a project shell in this bot's folder; null hides the row. */
+    onTerminal: (() -> Unit)? = null,
 ) {
     val c = Hypurr.colors
     val title = when {
@@ -269,6 +271,10 @@ fun BotEditorScreen(
             }
             if (!state.isNew) {
                 Section("More") {
+                    if (!state.group && onTerminal != null) {
+                        SoftButton("Terminal", Modifier.fillMaxWidth(), icon = signalIcon(SignalIcons.Terminal)) { onTerminal() }
+                        Text("Open a shell in this bot's project folder on the computer.", color = c.tertiary, style = MaterialTheme.typography.bodyMedium)
+                    }
                     ToggleRow("Pin to the top", "Keeps it first in the list", state.pinned, true) { onChange(state.copy(pinned = it)) }
                     AnimatedVisibility(!state.confirmDelete) {
                         SoftButton(if (state.group) "Delete group" else "Delete bot", Modifier.fillMaxWidth(), icon = signalIcon(SignalIcons.Close), tint = c.needsText) {

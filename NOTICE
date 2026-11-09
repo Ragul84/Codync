@@ -13,3 +13,13 @@ vendored in this repository; Hypurr installs a pinned release binary into
 ~/.hypurr/agents/opencode with the user's consent. Free Zen models (Big Pickle and
 others) are provided by OpenCode for a limited time under OpenCode's Zen terms; some
 free models may use prompts to improve the model. See https://opencode.ai/docs/zen/.
+
+---
+
+Android terminal (phone project shell) vendors the Apache-2.0 `terminal-emulator`
+and `terminal-view` libraries from Termux (https://github.com/termux/termux-app,
+tag v0.118.0), originally from jackpal Android Terminal Emulator
+(https://github.com/jackpal/Android-Terminal-Emulator). See
+apps/android/terminal-emulator/LICENSE and apps/android/terminal-view/LICENSE.
+Hypurr does not include Termux app code (GPLv3). Local JNI PTY support was removed;
+the session bridges to the host openShell PTY over the existing channel.
